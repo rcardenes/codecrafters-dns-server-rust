@@ -2,6 +2,8 @@ use std::{net::UdpSocket, fmt::Debug};
 
 use anyhow::{Result, bail};
 
+use crate::message::{Response, Query};
+
 static DEFAULT_ADDRESS: &str = "127.0.0.1";
 static DEFAULT_PORT: u16 = 2053;
 
@@ -46,16 +48,25 @@ impl Server {
         ServerBuilder::default().build()
     }
 
+    fn process_query(&self, query: Query) -> Response {
+        let response = Response::builder()
+            .id(query.id())
+            .opcode(query.opcode())
+            .recursion_desired(query.recursion_desired());
+
+        response.build()
+    }
+
     pub fn serve(&mut self) -> Result<()> {
         let mut buf = [0; 512];
 
         match self.socket.recv_from(&mut buf) {
             Ok((size, source)) => {
-                let _received_data = String::from_utf8_lossy(&buf[0..size]);
                 println!("Received {} bytes from {}", size, source);
-                let response = [];
+                let response = self.process_query(Query::try_from(&buf[..size])?);
+                let resp_vec: Vec<u8> = response.into();
                 self.socket
-                    .send_to(&response, source)
+                    .send_to(&resp_vec, source)
                     .expect("Failed to send response");
             }
             Err(e) => {

@@ -8,6 +8,9 @@ fn main() -> Result<()> {
     eprintln!("{server:?}");
 
     loop {
-        server.serve()?;
+        match server.serve() {
+            Err(err) => eprintln!("{err}"),
+            _ => {}
+        }
     }
 }
