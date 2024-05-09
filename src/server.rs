@@ -52,7 +52,8 @@ impl Server {
         let response = Response::builder()
             .id(query.id())
             .opcode(query.opcode())
-            .recursion_desired(query.recursion_desired());
+            .recursion_desired(query.recursion_desired())
+            .questions(query.questions());
 
         response.build()
     }
