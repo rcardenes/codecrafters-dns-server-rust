@@ -115,9 +115,8 @@ impl TryFrom<&[u8]> for Query {
                     bail!("Corrupt message: truncated query");
                 }
 
-                let (labels, _) = decode_name(&value[ptr..=pos])?;
                 questions.push(Question {
-                    qname: labels.into(),
+                    qname: Name::try_from(&value[ptr..=pos])?,
                     qtype: QType::try_from(u16::from_be_bytes([value[meta], value[meta + 1]]))?,
                     qclass: QClass::try_from(u16::from_be_bytes([value[meta], value[meta + 1]]))?,
                 });

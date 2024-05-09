@@ -202,7 +202,7 @@ impl Into<u16> for QClass {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Name {
     labels: Vec<String>,
 }
@@ -210,6 +210,37 @@ pub struct Name {
 impl From<Vec<String>> for Name {
     fn from(value: Vec<String>) -> Self {
         Name { labels: value }
+    }
+}
+
+impl TryFrom<&[u8]> for Name {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &[u8]) -> Result<Self> {
+        let length = value.len();
+        let mut last_pos = 0;
+        let mut labels = vec![];
+
+        while last_pos < length {
+            let marker = last_pos as usize;
+            match value[marker..].first().unwrap() {
+                0 => { return Ok(Name { labels }) },
+                64.. => bail!("Corrupt name: label length > 63"),
+                label_length => {
+                    let start = marker + 1;
+                    let end = start + *label_length as usize;
+                    if end >= length {
+                        bail!("Corrupt name: truncated label")
+                    }
+
+                    let label = String::from_utf8(value[start..end].to_vec())?;
+                    labels.push(label);
+                    last_pos = end;
+                },
+            }
+        }
+
+        bail!("Corrupt name: no null label terminator")
     }
 }
 
@@ -227,5 +258,38 @@ impl Name {
         result.push(0);
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static LABELS: &[&str] = &["www", "server", "com"];
+    static ENCODED: &str = "\x03www\x06server\x03com\0";
+
+    #[test]
+    fn vec_to_name() {
+        let encoded_vec: Vec<u8> = ENCODED.into();
+
+        let name: Name = LABELS.iter()
+            .map(|&s| String::from(s))
+            .collect::<Vec<String>>()
+            .into();
+
+        assert_eq!(encoded_vec, name.to_vec());
+    }
+
+    #[test]
+    fn name_to_vec() {
+        let encoded_vec: Vec<u8> = ENCODED.into();
+        let name = Name::try_from(&encoded_vec[..]).unwrap();
+
+        let target: Name = LABELS.iter()
+            .map(|&s| String::from(s))
+            .collect::<Vec<String>>()
+            .into();
+
+        assert_eq!(target, name);
     }
 }
