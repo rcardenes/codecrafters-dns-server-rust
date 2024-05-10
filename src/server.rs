@@ -1,11 +1,15 @@
 use std::{collections::HashMap, fmt::Debug, net::UdpSocket};
 
 use anyhow::{Result, bail};
+use once_cell::sync::Lazy;
 
 use crate::{common::{Name, Record}, message::{Answer, Query, Response}};
 
 static DEFAULT_ADDRESS: &str = "127.0.0.1";
 static DEFAULT_PORT: u16 = 2053;
+static FAKE_RECORD: Lazy<Record> = Lazy::new(|| {
+    Record::from_ip_v4("8.8.8.8").unwrap()
+});
 
 #[derive(Debug)]
 pub struct ServerBuilder {
@@ -55,8 +59,9 @@ impl Server {
     fn process_query(&self, query: Query) -> Response {
         let answers = query.questions()
                        .iter()
-                       .flat_map(|q| self.lookup(q.name()).map(|r| (q, r)))
-                       .map(|(q, r)| Answer::new(q.name(), r, 60))
+//                       .flat_map(|q| self.lookup(q.name()).map(|r| (q, r)))
+//                       .map(|(q, r)| Answer::new(q.name(), r, 60))
+                       .map(|q| Answer::new(q.name(), &FAKE_RECORD, 60))
                        .collect::<Vec<_>>();
         let response = Response::builder()
             .id(query.id())
