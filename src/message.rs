@@ -138,7 +138,12 @@ impl TryFrom<&[u8]> for Query {
             query.questions.push(question);
         }
 
-        query.response_code = ResponseCode::NoError;
+
+        query.response_code = match query.opcode {
+            OpCode::Query => ResponseCode::NoError,
+            _ => ResponseCode::NotImplemented,
+        };
+
         Ok(query)
     }
 }
