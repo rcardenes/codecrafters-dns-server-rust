@@ -12,15 +12,14 @@ fn config_server(server: &mut Server) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let mut server = Server::default()?;
+    let mut server = Server::new()?;
     config_server(&mut server)?;
 
     eprintln!("{server:?}");
 
     loop {
-        match server.serve() {
-            Err(err) => eprintln!("{err}"),
-            _ => {}
+        if let Err(err) = server.serve() {
+            eprintln!("{err}")
         }
     }
 }

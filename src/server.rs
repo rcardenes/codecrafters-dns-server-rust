@@ -14,10 +14,6 @@ pub struct ServerBuilder {
 }
 
 impl ServerBuilder {
-    pub fn default() -> Self {
-        ServerBuilder { address: DEFAULT_ADDRESS.into(), port: DEFAULT_PORT }
-    }
-
     pub fn address(mut self, addr: &str) -> Self {
         self.address = String::from(addr);
         self
@@ -38,6 +34,12 @@ impl ServerBuilder {
     }
 }
 
+impl Default for ServerBuilder {
+    fn default() -> Self {
+        ServerBuilder { address: DEFAULT_ADDRESS.into(), port: DEFAULT_PORT }
+    }
+}
+
 pub struct Server {
     address: String,
     port: u16,
@@ -46,15 +48,14 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn default() -> Result<Server> {
+    pub fn new() -> Result<Server> {
         ServerBuilder::default().build()
     }
 
     fn process_query(&self, query: Query) -> Response {
         let answers = query.questions()
                        .iter()
-                       .map(|q| self.lookup(q.name()).map(|r| (q, r)))
-                       .flatten()
+                       .flat_map(|q| self.lookup(q.name()).map(|r| (q, r)))
                        .map(|(q, r)| Answer::new(q.name(), r, 60))
                        .collect::<Vec<_>>();
         let response = Response::builder()
@@ -90,7 +91,7 @@ impl Server {
 
     pub fn add_record(&mut self, name: &str, record: Record) {
         self.records.insert(
-            Name::from(name.split(".").collect::<Vec<_>>()),
+            Name::from(name.split('.').collect::<Vec<_>>()),
             record
             );
     }

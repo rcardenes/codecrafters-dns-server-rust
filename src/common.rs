@@ -21,13 +21,13 @@ impl From<u8> for OpCode {
     }
 }
 
-impl Into<u8> for OpCode {
-    fn into(self) -> u8 {
-        match self {
-            Self::Query => 0,
-            Self::IQuery => 1,
-            Self::Status => 2,
-            Self::Reserved(value) => value,
+impl From<OpCode> for u8 {
+    fn from(value: OpCode) -> Self {
+        match value {
+            OpCode::Query => 0,
+            OpCode::IQuery => 1,
+            OpCode::Status => 2,
+            OpCode::Reserved(value) => value,
         }
     }
 }
@@ -79,9 +79,9 @@ impl TryFrom<u16> for RRType {
     }
 }
 
-impl Into<u16> for RRType {
-    fn into(self) -> u16 {
-        match self {
+impl From<RRType> for u16 {
+    fn from(value: RRType) -> u16 {
+        match value {
             RRType::A => 1,
             RRType::NS => 2,
             RRType::MD => 3,
@@ -128,9 +128,9 @@ impl TryFrom<u16> for QType {
     }
 }
 
-impl Into<u16> for QType {
-    fn into(self) -> u16 {
-        match self {
+impl From<QType> for u16 {
+    fn from(value: QType) -> u16 {
+        match value {
             QType::RRType(rr) => rr.into(),
             QType::AXFR => 252,
             QType::MAILB => 253,
@@ -148,9 +148,9 @@ pub enum RRClass {
     HS,
 }
 
-impl Into<u16> for RRClass {
-    fn into(self) -> u16 {
-        match self {
+impl From<RRClass> for u16 {
+    fn from(value: RRClass) -> u16 {
+        match value {
             RRClass::IN => 1,
             RRClass::CS => 2,
             RRClass::CH => 3,
@@ -193,9 +193,9 @@ impl TryFrom<u16> for QClass {
     }
 }
 
-impl Into<u16> for QClass {
-    fn into(self) -> u16 {
-        match self {
+impl From<QClass> for u16 {
+    fn from(value: QClass) -> u16 {
+        match value {
             QClass::ANY => 255,
             QClass::RRClass(rr) => rr.into(),
         }
@@ -228,7 +228,7 @@ impl TryFrom<&[u8]> for Name {
         let mut labels = vec![];
 
         while last_pos < length {
-            let marker = last_pos as usize;
+            let marker = last_pos;
             match value[marker..].first().unwrap() {
                 0 => { return Ok(Name { labels }) },
                 64.. => bail!("Corrupt name: label length > 63"),
@@ -251,6 +251,7 @@ impl TryFrom<&[u8]> for Name {
 }
 
 impl Name {
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.labels.iter().map(|l| l.len() + 1).sum::<usize>() + 1
     }
@@ -258,11 +259,10 @@ impl Name {
     pub fn to_vec(&self) -> Vec<u8> {
         let mut result: Vec<u8> = self.labels
             .iter()
-            .map(|s| {
+            .flat_map(|s| {
                 let mut v = vec![s.len() as u8];
                 v.extend(s.as_bytes());
                 v})
-            .flatten()
             .collect();
 
         result.push(0);
@@ -293,7 +293,7 @@ pub struct Record {
 impl Record {
     pub fn from_ip_v4(source: &str) -> Result<Self> {
         let components: std::result::Result<Vec<_>, _> =
-            source.split(".")
+            source.split('.')
                   .map(|c| c.parse::<u8>())
                   .collect();
 
@@ -316,7 +316,7 @@ impl Record {
             self.data.clone()
         ];
 
-        data.iter().flatten().map(|&val| val).collect()
+        data.iter().flatten().copied().collect()
     }
 }
 

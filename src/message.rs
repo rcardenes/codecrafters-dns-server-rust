@@ -9,6 +9,7 @@ pub struct Question {
 }
 
 impl Question {
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.qname.len() + 4
     }
@@ -134,7 +135,7 @@ impl TryFrom<&[u8]> for Query {
                 Err(err) => { println!("{err}"); return Ok(query); }
             };
             ptr = question.len();
-            qdcount = qdcount - 1;
+            qdcount -= qdcount;
             query.questions.push(question);
         }
 
@@ -168,10 +169,10 @@ impl Answer {
         [self.name.to_vec(),
          u16::to_be_bytes(self.record.rrtype().clone().into()).to_vec(),
          u16::to_be_bytes(self.record.rrclass().clone().into()).to_vec(),
-         u32::to_be_bytes(self.ttl.into()).to_vec(),
+         u32::to_be_bytes(self.ttl).to_vec(),
          u16::to_be_bytes(self.record.data().len() as u16).to_vec(),
          self.record.data().clone()
-        ].iter().cloned().flatten().collect()
+        ].iter().flatten().cloned().collect()
     }
 }
 
@@ -194,19 +195,19 @@ impl Response {
     }
 }
 
-impl Into<Vec<u8>> for Response {
-    fn into(self) -> Vec<u8> {
-        let oc: u8 = self.opcode.into();
-        let aa = if self.authoritative_answer { 4u8 } else { 0 };
-        let tc = if self.truncation { 2u8 } else { 0 };
-        let rd = if self.recursion_desired { 1u8 } else { 0 };
-        let rc = self.response_code as u8;
-        let ra = if self.recursion_available { 0x80u8 } else { 0 };
-        let qdcount = u16::to_be_bytes(self.questions.len() as u16);
-        let ancount = u16::to_be_bytes(self.answers.len() as u16);
+impl From<Response> for Vec<u8> {
+    fn from(value: Response) -> Self {
+        let oc: u8 = value.opcode.into();
+        let aa = if value.authoritative_answer { 4u8 } else { 0 };
+        let tc = if value.truncation { 2u8 } else { 0 };
+        let rd = if value.recursion_desired { 1u8 } else { 0 };
+        let rc = value.response_code as u8;
+        let ra = if value.recursion_available { 0x80u8 } else { 0 };
+        let qdcount = u16::to_be_bytes(value.questions.len() as u16);
+        let ancount = u16::to_be_bytes(value.answers.len() as u16);
 
         let mut res = vec![
-            (self.id >> 8) as u8, (self.id & 0xff) as u8,
+            (value.id >> 8) as u8, (value.id & 0xff) as u8,
             (0x80 | oc << 3 | aa | tc | rd) , ra | rc,
             qdcount[0], qdcount[1],
             ancount[0], ancount[1],
@@ -214,16 +215,14 @@ impl Into<Vec<u8>> for Response {
             0, 0,
         ];
 
-        res.extend(self.questions
+        res.extend(value.questions
                    .iter()
-                   .map(|q| q.to_vec())
-                   .flatten()
+                   .flat_map(|q| q.to_vec())
                    .collect::<Vec<u8>>());
 
-        res.extend(self.answers
+        res.extend(value.answers
                    .iter()
-                   .map(|q| q.to_vec())
-                   .flatten()
+                   .flat_map(|q| q.to_vec())
                    .collect::<Vec<u8>>());
 
 
