@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use crate::common::{Name, OpCode, QType, QClass, ResponseCode};
+use crate::common::{Name, OpCode, QClass, QType, Record, ResponseCode};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Question {
@@ -9,11 +9,15 @@ pub struct Question {
 }
 
 impl Question {
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.qname.len() + 4
     }
 
-    fn to_vec(&self) -> Vec<u8> {
+    pub fn name(&self) -> &Name {
+        &self.qname
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
         let mut result = self.qname.to_vec();
         result.extend(u16::to_be_bytes(self.qtype.clone().into()));
         result.extend(u16::to_be_bytes(self.qclass.clone().into()));
@@ -139,6 +143,33 @@ impl TryFrom<&[u8]> for Query {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Answer {
+    name: Name,
+    record: Record,
+    ttl: u32,
+}
+
+impl Answer {
+    pub fn new(name: &Name, record: &Record, ttl: u32) -> Self {
+        Answer {
+            name: name.clone(),
+            record: record.clone(),
+            ttl
+        }
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        [self.name.to_vec(),
+         u16::to_be_bytes(self.record.rrtype().clone().into()).to_vec(),
+         u16::to_be_bytes(self.record.rrclass().clone().into()).to_vec(),
+         u32::to_be_bytes(self.ttl.into()).to_vec(),
+         u16::to_be_bytes(self.record.data().len() as u16).to_vec(),
+         self.record.data().clone()
+        ].iter().cloned().flatten().collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Response {
     id: u16,
@@ -149,6 +180,7 @@ pub struct Response {
     recursion_available: bool,
     response_code: ResponseCode,
     questions: Vec<Question>,
+    answers: Vec<Answer>,
 }
 
 impl Response {
@@ -166,12 +198,13 @@ impl Into<Vec<u8>> for Response {
         let rc = self.response_code as u8;
         let ra = if self.recursion_available { 0x80u8 } else { 0 };
         let qdcount = u16::to_be_bytes(self.questions.len() as u16);
+        let ancount = u16::to_be_bytes(self.answers.len() as u16);
 
         let mut res = vec![
             (self.id >> 8) as u8, (self.id & 0xff) as u8,
             (0x80 | oc << 3 | aa | tc | rd) , ra | rc,
             qdcount[0], qdcount[1],
-            0, 0,
+            ancount[0], ancount[1],
             0, 0,
             0, 0,
         ];
@@ -181,6 +214,13 @@ impl Into<Vec<u8>> for Response {
                    .map(|q| q.to_vec())
                    .flatten()
                    .collect::<Vec<u8>>());
+
+        res.extend(self.answers
+                   .iter()
+                   .map(|q| q.to_vec())
+                   .flatten()
+                   .collect::<Vec<u8>>());
+
 
         res
     }
@@ -196,6 +236,7 @@ pub struct ResponseBuilder {
     recursion_available: bool,
     response_code: ResponseCode,
     questions: Vec<Question>,
+    answers: Vec<Answer>,
 }
 
 impl ResponseBuilder {
@@ -209,6 +250,7 @@ impl ResponseBuilder {
             recursion_available: self.recursion_available,
             response_code: self.response_code,
             questions: self.questions,
+            answers: self.answers,
         }
     }
 
@@ -251,6 +293,11 @@ impl ResponseBuilder {
         self.questions = questions;
         self
     }
+
+    pub fn answers(mut self, answers: Vec<Answer>) -> Self {
+        self.answers = answers;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -268,7 +315,7 @@ mod tests {
 
     static SAMPLE_BIN_RESPONSES: &[&[u8]] = &[
         b"\xfd\xf0\x81\x00\x00\x01\x00\x00\x00\x00\x00\x00\x0ccodecrafters\x02io\x00\x00\x01\x00\x01",
-
+        b"\xfd\xf0\x81\x00\x00\x01\x00\x01\x00\x00\x00\x00\x0ccodecrafters\x02io\x00\x00\x01\x00\x01\x0ccodecrafters\x02io\x00\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\x08\x08\x08\x08",
     ];
 
     static SAMPLE_BIN_QUESTION: &[u8] = b"\x0ccodecrafters\x02io\x00\x00\x01\x00\x01";
@@ -278,6 +325,14 @@ mod tests {
             qname: vec!["codecrafters", "io"].into(),
             qtype: QType::RRType(RRType::A),
             qclass: QClass::RRClass(RRClass::IN),
+        }
+    });
+
+    static SAMPLE_ANSWER: Lazy<Answer> = Lazy::new(|| {
+        Answer {
+            name: Name::from(vec!["codecrafters", "io"]),
+            record: Record::from_ip_v4("8.8.8.8").expect("Not a valid IPv4"),
+            ttl: 60,
         }
     });
 
@@ -300,6 +355,14 @@ mod tests {
                 .opcode(OpCode::Query)
                 .recursion_desired(true)
                 .questions(vec![SAMPLE_QUESTION.clone()])
+                .response_code(ResponseCode::NoError)
+                .build(),
+            Response::builder()
+                .id(0xfdf0)
+                .opcode(OpCode::Query)
+                .recursion_desired(true)
+                .questions(vec![SAMPLE_QUESTION.clone()])
+                .answers(vec![SAMPLE_ANSWER.clone()])
                 .response_code(ResponseCode::NoError)
                 .build(),
         ]

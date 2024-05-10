@@ -202,7 +202,7 @@ impl Into<u16> for QClass {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name {
     labels: Vec<String>,
 }
@@ -283,16 +283,66 @@ pub enum ResponseCode {
     Reserved,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Record {
+    rrtype: RRType,
+    rrclass: RRClass,
+    data: Vec<u8>,
+}
+
+impl Record {
+    pub fn from_ip_v4(source: &str) -> Result<Self> {
+        let components: std::result::Result<Vec<_>, _> =
+            source.split(".")
+                  .map(|c| c.parse::<u8>())
+                  .collect();
+
+        Ok(Record {
+            rrtype: RRType::A,
+            rrclass: RRClass::IN,
+            data: components?,
+        })
+    }
+
+    pub fn rrtype(&self) -> &RRType { &self.rrtype }
+    pub fn rrclass(&self) -> &RRClass { &self.rrclass }
+    pub fn data(&self) -> &Vec<u8> { &self.data }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        let data = [
+            u16::to_be_bytes(self.rrtype.clone().into()).to_vec(),
+            u16::to_be_bytes(self.rrclass.clone().into()).to_vec(),
+            u16::to_be_bytes(self.data.len() as u16).to_vec(),
+            self.data.clone()
+        ];
+
+        data.iter().flatten().map(|&val| val).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use once_cell::sync::Lazy;
+
     use super::*;
 
     static LABELS: &[&str] = &["www", "server", "com"];
-    static ENCODED: &str = "\x03www\x06server\x03com\0";
+    static ENCODED_LABELS: &str = "\x03www\x06server\x03com\0";
+    static IPV4: &str = "1.2.3.4";
+    static IPV4_RECORD: Lazy<Record> = Lazy::new(|| {
+        Record {
+            rrtype: RRType::A,
+            rrclass: RRClass::IN,
+            data: b"\x01\x02\x03\x04".to_vec()
+        }
+    });
+    static ENCODED_IPV4_RECORD: Lazy<Vec<u8>> = Lazy::new(|| {
+        b"\x00\x01\x00\x01\x00\x04\x01\x02\x03\x04".to_vec()
+    });
 
     #[test]
     fn vec_to_name() {
-        let encoded_vec: Vec<u8> = ENCODED.into();
+        let encoded_vec: Vec<u8> = ENCODED_LABELS.into();
 
         let name: Name = LABELS.iter()
             .map(|&s| String::from(s))
@@ -304,7 +354,7 @@ mod tests {
 
     #[test]
     fn name_to_vec() {
-        let encoded_vec: Vec<u8> = ENCODED.into();
+        let encoded_vec: Vec<u8> = ENCODED_LABELS.into();
         let name = Name::try_from(&encoded_vec[..]).unwrap();
 
         let target: Name = LABELS.iter()
@@ -313,5 +363,17 @@ mod tests {
             .into();
 
         assert_eq!(target, name);
+    }
+
+    #[test]
+    fn ipv4_str_to_record() -> Result<()> {
+        assert_eq!(IPV4_RECORD.clone(), Record::from_ip_v4(IPV4)?);
+        Ok(())
+    }
+
+    #[test]
+    fn encode_record() -> Result<()> {
+        assert_eq!(ENCODED_IPV4_RECORD.clone(), IPV4_RECORD.to_vec());
+        Ok(())
     }
 }

@@ -1,8 +1,8 @@
-use std::{net::UdpSocket, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, net::UdpSocket};
 
 use anyhow::{Result, bail};
 
-use crate::message::{Response, Query};
+use crate::{common::{Name, Record}, message::{Answer, Query, Response}};
 
 static DEFAULT_ADDRESS: &str = "127.0.0.1";
 static DEFAULT_PORT: u16 = 2053;
@@ -33,6 +33,7 @@ impl ServerBuilder {
             socket: UdpSocket::bind((self.address.as_str(), self.port)).expect("Failed to bind to address"),
             address: self.address,
             port: self.port,
+            records: HashMap::new(),
         })
     }
 }
@@ -41,6 +42,7 @@ pub struct Server {
     address: String,
     port: u16,
     socket: UdpSocket,
+    records: HashMap<Name, Record>,
 }
 
 impl Server {
@@ -49,11 +51,18 @@ impl Server {
     }
 
     fn process_query(&self, query: Query) -> Response {
+        let answers = query.questions()
+                       .iter()
+                       .map(|q| self.lookup(q.name()).map(|r| (q, r)))
+                       .flatten()
+                       .map(|(q, r)| Answer::new(q.name(), r, 60))
+                       .collect::<Vec<_>>();
         let response = Response::builder()
             .id(query.id())
             .opcode(query.opcode())
             .recursion_desired(query.recursion_desired())
             .questions(query.questions())
+            .answers(answers)
             .response_code(query.response_code());
 
         response.build()
@@ -77,6 +86,17 @@ impl Server {
         }
 
         Ok(())
+    }
+
+    pub fn add_record(&mut self, name: &str, record: Record) {
+        self.records.insert(
+            Name::from(name.split(".").collect::<Vec<_>>()),
+            record
+            );
+    }
+
+    pub fn lookup(&self, name: &Name) -> Option<&Record> {
+        self.records.get(name)
     }
 }
 
