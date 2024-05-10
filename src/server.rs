@@ -53,7 +53,8 @@ impl Server {
             .id(query.id())
             .opcode(query.opcode())
             .recursion_desired(query.recursion_desired())
-            .questions(query.questions());
+            .questions(query.questions())
+            .response_code(query.response_code());
 
         response.build()
     }

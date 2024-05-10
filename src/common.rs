@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[repr(u8)]
 pub enum OpCode {
     #[default]
@@ -33,7 +33,7 @@ impl Into<u8> for OpCode {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RRType {
     A,
     NS,
@@ -102,7 +102,7 @@ impl Into<u16> for RRType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum QType {
     RRType(RRType),
     AXFR,
@@ -131,7 +131,7 @@ impl TryFrom<u16> for QType {
 impl Into<u16> for QType {
     fn into(self) -> u16 {
         match self {
-            QType::RRType(rr) => rr as u16,
+            QType::RRType(rr) => rr.into(),
             QType::AXFR => 252,
             QType::MAILB => 253,
             QType::MAILA => 254,
@@ -140,7 +140,7 @@ impl Into<u16> for QType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RRClass {
     IN,
     CS,
@@ -173,7 +173,7 @@ impl TryFrom<u16> for RRClass {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum QClass {
     RRClass(RRClass),
     ANY,
@@ -213,6 +213,12 @@ impl From<Vec<String>> for Name {
     }
 }
 
+impl From<Vec<&str>> for Name {
+    fn from(value: Vec<&str>) -> Self {
+        Name { labels: value.iter().map(|&s| s.to_string()).collect() }
+    }
+}
+
 impl TryFrom<&[u8]> for Name {
     type Error = anyhow::Error;
 
@@ -245,6 +251,10 @@ impl TryFrom<&[u8]> for Name {
 }
 
 impl Name {
+    pub fn len(&self) -> usize {
+        self.labels.iter().map(|l| l.len() + 1).sum::<usize>() + 1
+    }
+
     pub fn to_vec(&self) -> Vec<u8> {
         let mut result: Vec<u8> = self.labels
             .iter()
@@ -259,6 +269,18 @@ impl Name {
 
         result
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum ResponseCode {
+    NoError = 0,
+    #[default]
+    FormatError,
+    ServerFailure,
+    NameError,
+    NotImplemented,
+    Refused,
+    Reserved,
 }
 
 #[cfg(test)]
