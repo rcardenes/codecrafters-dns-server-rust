@@ -1,3 +1,5 @@
+use std::collections::{hash_map::Entry, HashMap};
+
 use anyhow::{Result, bail};
 use crate::common::{Name, OpCode, QClass, QType, Record, ResponseCode};
 
@@ -18,6 +20,20 @@ impl Question {
         &self.qname
     }
 
+    pub fn expand(&self, references: &HashMap<u16, Vec<String>>) -> Result<Question> {
+        Ok(Question {
+            qname: self.qname.expand(references)?,
+            ..self.clone()
+        })
+    }
+
+    pub fn compress(&self, references: &HashMap<Vec<String>, u16>) -> Result<Question> {
+        Ok(Question {
+            qname: self.qname.compress(references)?,
+            ..self.clone()
+        })
+    }
+
     pub fn to_vec(&self) -> Vec<u8> {
         let mut result = self.qname.to_vec();
         result.extend(u16::to_be_bytes(self.qtype.clone().into()));
@@ -31,22 +47,21 @@ impl TryFrom<&[u8]> for Question {
     type Error = anyhow::Error;
 
     fn try_from(value: &[u8]) -> Result<Self> {
-        if let Some(pos) = value.iter().position(|&x| x == 0) {
-            let meta = pos + 1;
+        if !value.is_empty() {
+            let qname = Name::try_from(value)?;
+            let meta = qname.len();
             let query_end = meta + 4;
 
             if query_end > value.len() {
                 bail!("Corrupt message: truncated question");
             }
 
-            let qname = Name::try_from(&value[..=meta])?;
             let qtype = QType::try_from(u16::from_be_bytes([value[meta], value[meta + 1]]))?;
-
-            let qclass = QClass::try_from(u16::from_be_bytes([value[meta], value[meta + 1]]))?;
+            let qclass = QClass::try_from(u16::from_be_bytes([value[meta + 2], value[meta + 3]]))?;
 
             Ok(Question { qname, qtype, qclass })
         } else {
-            bail!("Corrupt name: no null label terminator")
+            bail!("Empty question")
         }
     }
 }
@@ -59,6 +74,7 @@ pub struct Query {
     truncation: bool,
     recursion_desired: bool,
     questions: Vec<Question>,
+    dict: HashMap<u16, Vec<String>>,
 }
 
 impl Query {
@@ -121,8 +137,8 @@ impl TryFrom<&[u8]> for Query {
             return Ok(query);
         }
 
+        let mut ref_store: HashMap<u16, Vec<String>> = HashMap::new();
         let mut qdcount = u16::from_be_bytes([value[4], value[5]]);
-
         let mut ptr = 12;
         while qdcount > 0 {
             if ptr >= value.len() {
@@ -134,11 +150,35 @@ impl TryFrom<&[u8]> for Query {
                 Ok(q) => q,
                 Err(err) => { println!("{err}"); return Ok(query); }
             };
-            ptr = question.len();
-            qdcount -= qdcount;
-            query.questions.push(question);
-        }
 
+            let n_labels = question.name().labels().len();
+
+            let delta = question.len();
+
+            let expanded_question = {
+                if question.name().pointer().is_some() {
+                    question.expand(&ref_store)?
+                } else {
+                    question
+                }
+            };
+
+            let expanded_labels = expanded_question.name().labels().clone();
+
+            let mut ref_ptr = ptr as u16;
+            for start in 0..n_labels {
+                let partial = &expanded_labels[start..];
+                ref_store.insert(ref_ptr, partial.to_vec());
+
+                ref_ptr += (partial[0].len() + 1) as u16;
+            }
+
+            ref_store.insert(ptr as u16, expanded_question.name().labels().clone());
+
+            ptr += delta;
+            qdcount -= 1;
+            query.questions.push(expanded_question);
+        }
 
         query.response_code = match query.opcode {
             OpCode::Query => ResponseCode::NoError,
@@ -163,6 +203,17 @@ impl Answer {
             record: record.clone(),
             ttl
         }
+    }
+
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn compress(&self, references: &HashMap<Vec<String>, u16>) -> Result<Answer> {
+        Ok(Answer {
+            name: self.name.compress(references)?,
+            ..self.clone()
+        })
     }
 
     pub fn to_vec(&self) -> Vec<u8> {
@@ -215,16 +266,39 @@ impl From<Response> for Vec<u8> {
             0, 0,
         ];
 
-        res.extend(value.questions
-                   .iter()
-                   .flat_map(|q| q.to_vec())
-                   .collect::<Vec<u8>>());
+        let mut ref_store: HashMap::<Vec<String>, u16> = HashMap::new();
+        let mut ptr: u16 = 12;
+        for question in value.questions {
+            let compressed = question.compress(&ref_store).unwrap().to_vec();
+            let labels = question.name().labels().clone();
+            let mut ref_ptr = ptr;
+            for start in 0..labels.len() {
+                let partial = &labels[start..];
+                if let Entry::Vacant(v) = ref_store.entry(partial.to_vec()) {
+                    v.insert(ref_ptr);
+                }
 
-        res.extend(value.answers
-                   .iter()
-                   .flat_map(|q| q.to_vec())
-                   .collect::<Vec<u8>>());
+                ref_ptr += (partial[0].len() + 1) as u16;
+            }
+            ptr += compressed.len() as u16;
+            res.extend(compressed);
+        }
 
+        for answer in value.answers {
+            let compressed = answer.compress(&ref_store).unwrap().to_vec();
+            let labels = answer.name().labels().clone();
+            let mut ref_ptr = ptr;
+            for start in 0..labels.len() {
+                let partial = &labels[start..];
+                if let Entry::Vacant(v) = ref_store.entry(partial.to_vec()) {
+                    v.insert(ref_ptr);
+                }
+
+                ref_ptr += (partial[0].len() + 1) as u16;
+            }
+            ptr += compressed.len() as u16;
+            res.extend(compressed);
+        }
 
         res
     }
@@ -319,7 +393,7 @@ mod tests {
 
     static SAMPLE_BIN_RESPONSES: &[&[u8]] = &[
         b"\xfd\xf0\x81\x00\x00\x01\x00\x00\x00\x00\x00\x00\x0ccodecrafters\x02io\x00\x00\x01\x00\x01",
-        b"\xfd\xf0\x81\x00\x00\x01\x00\x01\x00\x00\x00\x00\x0ccodecrafters\x02io\x00\x00\x01\x00\x01\x0ccodecrafters\x02io\x00\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\x08\x08\x08\x08",
+        b"\xfd\xf0\x81\x00\x00\x01\x00\x01\x00\x00\x00\x00\x0ccodecrafters\x02io\x00\x00\x01\x00\x01\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\x08\x08\x08\x08",
     ];
 
     static SAMPLE_BIN_QUESTION: &[u8] = b"\x0ccodecrafters\x02io\x00\x00\x01\x00\x01";
@@ -402,4 +476,11 @@ mod tests {
         }
     }
     
+    #[test]
+    fn compressed_query() -> Result<()> {
+        let bytes = b"\xce5\x01\x00\x00\x02\x00\x00\x00\x00\x00\x00\x03abc\x11longassdomainname\x03com\x00\x00\x01\x00\x01\x03def\xc0\x10\x00\x01\x00\x01".to_vec();
+        let _ = Query::try_from(&bytes[..])?;
+
+        Ok(())
+    }
 }

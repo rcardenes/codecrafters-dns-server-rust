@@ -61,7 +61,7 @@ impl Server {
                        .iter()
 //                       .flat_map(|q| self.lookup(q.name()).map(|r| (q, r)))
 //                       .map(|(q, r)| Answer::new(q.name(), r, 60))
-                       .map(|q| Answer::new(q.name(), &FAKE_RECORD, 60))
+                       .map(|q| { eprintln!("Building answer from {q:?}"); Answer::new(q.name(), &FAKE_RECORD, 60) } )
                        .collect::<Vec<_>>();
         let response = Response::builder()
             .id(query.id())
